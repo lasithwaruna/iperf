@@ -35,24 +35,24 @@ main( int argc, char** argv )
 	fprintf( stderr, "%s: failed to create test\n", argv0 );
 	exit( EXIT_FAILURE );
     }
-    iperf_defaults( test );
-    iperf_set_verbose( test, 1 );
+    iperf_test_defaults( test );
+  //  iperf_set_verbose( test, 1 );
     iperf_set_test_role( test, 's' );
     iperf_set_test_server_port( test, port );
 
     consecutive_errors = 0;
-    for (;;) {
-	if ( iperf_run_server( test ) < 0 ) {
-	    fprintf( stderr, "%s: error - %s\n\n", argv0, iperf_strerror( i_errno ) );
-	    ++consecutive_errors;
-	    if (consecutive_errors >= 5) {
-	        fprintf(stderr, "%s: too many errors, exiting\n", argv0);
-		break;
-	    }
-	} else
-	    consecutive_errors = 0;
-	iperf_reset_test( test );
-    }
+    // for (;;) {
+	// if ( iperf_run_server( test ) < 0 ) {
+	//     fprintf( stderr, "%s: error - %s\n\n", argv0, iperf_strerror( i_errno ) );
+	//     ++consecutive_errors;
+	//     if (consecutive_errors >= 5) {
+	//         fprintf(stderr, "%s: too many errors, exiting\n", argv0);
+	// 	break;
+	//     }
+	// } else
+	//     consecutive_errors = 0;
+	// iperf_reset_single_test( test );
+    // }
 
     iperf_free_test( test );
     exit( EXIT_SUCCESS );

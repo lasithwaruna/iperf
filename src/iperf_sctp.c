@@ -82,7 +82,7 @@ iperf_sctp_recv(struct iperf_stream *sp)
 }
 
 
-/* iperf_sctp_send
+/* iperf_sctp_send 
  *
  * sends the data for SCTP
  */
@@ -94,7 +94,7 @@ iperf_sctp_send(struct iperf_stream *sp)
 
     r = Nwrite(sp->socket, sp->buffer, sp->settings->blksize, Psctp);
     if (r < 0)
-        return r;
+        return r;    
 
     sp->result->bytes_sent += r;
     sp->result->bytes_sent_this_interval += r;
@@ -165,7 +165,7 @@ iperf_sctp_listen(struct iperf_test *test)
     int s, opt, saved_errno;
 
     close(test->listener);
-
+   
     snprintf(portstr, 6, "%d", test->server_port);
     memset(&hints, 0, sizeof(hints));
     /*
@@ -227,13 +227,13 @@ iperf_sctp_listen(struct iperf_test *test)
     }
 
 #if defined(IPV6_V6ONLY) && !defined(__OpenBSD__)
-    if (res->ai_family == AF_INET6 && (test->settings->domain == AF_UNSPEC ||
+    if (res->ai_family == AF_INET6 && (test->settings->domain == AF_UNSPEC || 
         test->settings->domain == AF_INET6)) {
         if (test->settings->domain == AF_UNSPEC)
             opt = 0;
         else
             opt = 1;
-        if (setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY,
+        if (setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, 
 		       (char *) &opt, sizeof(opt)) < 0) {
 	    saved_errno = errno;
 	    close(s);
@@ -256,13 +256,13 @@ iperf_sctp_listen(struct iperf_test *test)
     }
 
     /* servers must call sctp_bindx() _instead_ of bind() */
-    if (!TAILQ_EMPTY(&test->xbind_addrs)) {
-        if (iperf_sctp_bindx(test, s, IPERF_SCTP_SERVER)) {
-            close(s);
-            freeaddrinfo(res);
-            return -1;
-        }
-    } else
+    // if (!TAILQ_EMPTY(&test->xbind_addrs)) {
+    //     if (iperf_sctp_bindx(test, s, IPERF_SCTP_SERVER)) {
+    //         close(s);
+    //         freeaddrinfo(res);
+    //         return -1;
+    //     }
+    // } else
     if (bind(s, (struct sockaddr *) res->ai_addr, res->ai_addrlen) < 0) {
         saved_errno = errno;
         close(s);
@@ -280,7 +280,7 @@ iperf_sctp_listen(struct iperf_test *test)
     }
 
     test->listener = s;
-
+  
     return s;
 #else
     i_errno = IENOSCTP;
@@ -506,13 +506,13 @@ iperf_sctp_connect(struct iperf_test *test)
     }
 
     /* clients must call bind() followed by sctp_bindx() before connect() */
-    if (!TAILQ_EMPTY(&test->xbind_addrs)) {
-        if (iperf_sctp_bindx(test, s, IPERF_SCTP_CLIENT)) {
-            freeaddrinfo(server_res);
-            close(s);
-            return -1;
-        }
-    }
+    // if (!TAILQ_EMPTY(&test->xbind_addrs)) {
+    //     if (iperf_sctp_bindx(test, s, IPERF_SCTP_CLIENT)) {
+    //         freeaddrinfo(server_res);
+    //         close(s);
+    //         return -1;
+    //     }
+    // }
 
     /* TODO support sctp_connectx() to avoid heartbeating. */
     if (connect(s, (struct sockaddr *) server_res->ai_addr, server_res->ai_addrlen) < 0 && errno != EINPROGRESS) {
@@ -600,8 +600,8 @@ iperf_sctp_bindx(struct iperf_test *test, int s, int is_server)
     xbe0 = NULL;
     retval = 0;
 
-    if (TAILQ_EMPTY(&test->xbind_addrs))
-        return retval; /* nothing to do */
+    // if (TAILQ_EMPTY(&test->xbind_addrs))
+    //     return retval; /* nothing to do */
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = (domain == AF_UNSPEC ? AF_INET6 : domain);
@@ -623,8 +623,8 @@ iperf_sctp_bindx(struct iperf_test *test, int s, int is_server)
         struct sockaddr_in6 *sin6;
         int eport;
 
-        xbe0 = TAILQ_FIRST(&test->xbind_addrs);
-        TAILQ_REMOVE(&test->xbind_addrs, xbe0, link);
+        // xbe0 = TAILQ_FIRST(&test->xbind_addrs);
+        // TAILQ_REMOVE(&test->xbind_addrs, xbe0, link);
 
         if ((gerror = getaddrinfo(xbe0->name, servname, &hints, &xbe0->ai)) != 0) {
             i_errno = IESETSCTPBINDX;
@@ -667,22 +667,22 @@ iperf_sctp_bindx(struct iperf_test *test, int s, int is_server)
     /* pass 1: resolve and compute lengths. */
     nxaddrs = 0;
     xaddrlen = 0;
-    TAILQ_FOREACH(xbe, &test->xbind_addrs, link) {
-        if (xbe->ai != NULL)
-            freeaddrinfo(xbe->ai);
-        if ((gerror = getaddrinfo(xbe->name, servname, &hints, &xbe->ai)) != 0) {
-            i_errno = IESETSCTPBINDX;
-            retval = -1;
-            goto out;
-        }
-        ai0 = xbe->ai;
-        for (ai = ai0; ai; ai = ai->ai_next) {
-            if (domain != AF_UNSPEC && domain != ai->ai_family)
-                continue;
-            xaddrlen += ai->ai_addrlen;
-            ++nxaddrs;
-        }
-    }
+    // TAILQ_FOREACH(xbe, &test->xbind_addrs, link) {
+    //     if (xbe->ai != NULL)
+    //         freeaddrinfo(xbe->ai);
+    //     if ((gerror = getaddrinfo(xbe->name, servname, &hints, &xbe->ai)) != 0) {
+    //         i_errno = IESETSCTPBINDX;
+    //         retval = -1;
+    //         goto out;
+    //     }
+    //     ai0 = xbe->ai;
+    //     for (ai = ai0; ai; ai = ai->ai_next) {
+    //         if (domain != AF_UNSPEC && domain != ai->ai_family)
+    //             continue;
+    //         xaddrlen += ai->ai_addrlen;
+    //         ++nxaddrs;
+    //     }
+    // }
 
     /* pass 2: copy into flat buffer. */
     xaddrs = (struct sockaddr *)malloc(xaddrlen);
@@ -692,15 +692,15 @@ iperf_sctp_bindx(struct iperf_test *test, int s, int is_server)
             goto out;
     }
     bp = (char *)xaddrs;
-    TAILQ_FOREACH(xbe, &test->xbind_addrs, link) {
-        ai0 = xbe->ai;
-        for (ai = ai0; ai; ai = ai->ai_next) {
-            if (domain != AF_UNSPEC && domain != ai->ai_family)
-                continue;
-	    memcpy(bp, ai->ai_addr, ai->ai_addrlen);
-            bp += ai->ai_addrlen;
-        }
-    }
+    // TAILQ_FOREACH(xbe, &test->xbind_addrs, link) {
+    //     ai0 = xbe->ai;
+    //     for (ai = ai0; ai; ai = ai->ai_next) {
+    //         if (domain != AF_UNSPEC && domain != ai->ai_family)
+    //             continue;
+	//     memcpy(bp, ai->ai_addr, ai->ai_addrlen);
+    //         bp += ai->ai_addrlen;
+    //     }
+    // }
 
     if (sctp_bindx(s, xaddrs, nxaddrs, SCTP_BINDX_ADD_ADDR) == -1) {
         saved_errno = errno;
@@ -717,15 +717,15 @@ iperf_sctp_bindx(struct iperf_test *test, int s, int is_server)
 
 out:
     /* client: put head node back. */
-    if (!is_server && xbe0)
-        TAILQ_INSERT_HEAD(&test->xbind_addrs, xbe0, link);
+    // if (!is_server && xbe0)
+    //     TAILQ_INSERT_HEAD(&test->xbind_addrs, xbe0, link);
 
-    TAILQ_FOREACH(xbe, &test->xbind_addrs, link) {
-        if (xbe->ai) {
-            freeaddrinfo(xbe->ai);
-            xbe->ai = NULL;
-        }
-    }
+    // TAILQ_FOREACH(xbe, &test->xbind_addrs, link) {
+    //     if (xbe->ai) {
+    //         freeaddrinfo(xbe->ai);
+    //         xbe->ai = NULL;
+    //     }
+    // }
 
     return retval;
 #else

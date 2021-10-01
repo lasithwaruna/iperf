@@ -1,4 +1,4 @@
-/*---------------------------------------------------------------
+/*--------------------------------------------------------------- 
  * iperf, Copyright (c) 2014-2021, The Regents of the University of
  * California, through Lawrence Berkeley National Laboratory (subject
  * to receipt of any required approvals from the U.S. Dept. of
@@ -27,49 +27,49 @@
  * Based on code that is:
  *
  * Copyright (c) 1999,2000,2001,2002,2003
- * The Board of Trustees of the University of Illinois
- * All Rights Reserved.
- *---------------------------------------------------------------
- * Permission is hereby granted, free of charge, to any person
- * obtaining a copy of this software (Iperf) and associated
- * documentation files (the "Software"), to deal in the Software
- * without restriction, including without limitation the
- * rights to use, copy, modify, merge, publish, distribute,
- * sublicense, and/or sell copies of the Software, and to permit
+ * The Board of Trustees of the University of Illinois            
+ * All Rights Reserved.                                           
+ *--------------------------------------------------------------- 
+ * Permission is hereby granted, free of charge, to any person    
+ * obtaining a copy of this software (Iperf) and associated       
+ * documentation files (the "Software"), to deal in the Software  
+ * without restriction, including without limitation the          
+ * rights to use, copy, modify, merge, publish, distribute,        
+ * sublicense, and/or sell copies of the Software, and to permit     
  * persons to whom the Software is furnished to do
- * so, subject to the following conditions:
+ * so, subject to the following conditions: 
  *
+ *     
+ * Redistributions of source code must retain the above 
+ * copyright notice, this list of conditions and 
+ * the following disclaimers. 
  *
- * Redistributions of source code must retain the above
- * copyright notice, this list of conditions and
- * the following disclaimers.
- *
- *
- * Redistributions in binary form must reproduce the above
- * copyright notice, this list of conditions and the following
- * disclaimers in the documentation and/or other materials
- * provided with the distribution.
- *
- *
- * Neither the names of the University of Illinois, NCSA,
- * nor the names of its contributors may be used to endorse
+ *     
+ * Redistributions in binary form must reproduce the above 
+ * copyright notice, this list of conditions and the following 
+ * disclaimers in the documentation and/or other materials 
+ * provided with the distribution. 
+ * 
+ *     
+ * Neither the names of the University of Illinois, NCSA, 
+ * nor the names of its contributors may be used to endorse 
  * or promote products derived from this Software without
- * specific prior written permission.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
- * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
- * NONINFRINGEMENT. IN NO EVENT SHALL THE CONTIBUTORS OR COPYRIGHT
- * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * specific prior written permission. 
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+ * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE CONTIBUTORS OR COPYRIGHT 
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, 
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, 
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE
- * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. 
  * ________________________________________________________________
- * National Laboratory for Applied Network Research
- * National Center for Supercomputing Applications
- * University of Illinois at Urbana-Champaign
+ * National Laboratory for Applied Network Research 
+ * National Center for Supercomputing Applications 
+ * University of Illinois at Urbana-Champaign 
  * http://www.ncsa.uiuc.edu
- * ________________________________________________________________
+ * ________________________________________________________________ 
  *
  * Locale.c
  * by Ajay Tirumala <tirumala@ncsa.uiuc.edu>
@@ -105,12 +105,9 @@ const char usage_longstr[] = "Usage: iperf3 [-s|-c host] [options]\n"
 #if defined(HAVE_CPU_AFFINITY)
                            "  -A, --affinity n/n,m      set CPU affinity\n"
 #endif /* HAVE_CPU_AFFINITY */
-#if defined(HAVE_SO_BINDTODEVICE)
-                           "  -B, --bind <host>[%<dev>] bind to the interface associated with the address <host>\n"
-                           "                            (optional <dev> equivalent to `--bind-dev <dev>`)\n"
-                           "  --bind-dev <dev>          bind to the network interface with SO_BINDTODEVICE\n"
-#else /* HAVE_SO_BINDTODEVICE */
                            "  -B, --bind      <host>    bind to the interface associated with the address <host>\n"
+#if defined(HAVE_SO_BINDTODEVICE)
+                           "  --bind-dev      <dev>     bind to the network interface with SO_BINDTODEVICE\n"
 #endif /* HAVE_SO_BINDTODEVICE */
                            "  -V, --verbose             more detailed output\n"
                            "  -J, --json                output in JSON format\n"
@@ -118,7 +115,7 @@ const char usage_longstr[] = "Usage: iperf3 [-s|-c host] [options]\n"
                            "  --forceflush              force flushing output at every interval\n"
                            "  --timestamps<=format>     emit a timestamp at the start of each output line\n"
                            "                            (optional \"=\" and format string as per strftime(3))\n"
-
+    
                            "  --rcv-timeout #           idle timeout for receiving data\n"
                            "                            (default %d ms)\n"
                            "  -d, --debug               emit debugging output\n"
@@ -142,8 +139,7 @@ const char usage_longstr[] = "Usage: iperf3 [-s|-c host] [options]\n"
                            "                            and client during the authentication process\n"
 #endif //HAVE_SSL
                            "Client specific:\n"
-                           "  -c, --client <host>[%<dev>] run in client mode, connecting to <host>\n"
-                           "                              (option <dev> equivalent to `--bind-dev <dev>`)\n"
+                           "  -c, --client    <host>    run in client mode, connecting to <host>\n"
 #if defined(HAVE_SCTP_H)
                            "  --sctp                    use SCTP rather than TCP\n"
                            "  -X, --xbind <name>        bind SCTP association to links\n"
@@ -205,7 +201,7 @@ const char usage_longstr[] = "Usage: iperf3 [-s|-c host] [options]\n"
                            "  --rsa-public-key-path     path to the RSA public key used to encrypt\n"
                            "                            authentication credentials\n"
 #endif //HAVESSL
-
+    
 #ifdef NOT_YET_SUPPORTED /* still working on these */
 #endif
 

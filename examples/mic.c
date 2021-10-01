@@ -36,8 +36,8 @@ main( int argc, char** argv )
 	fprintf( stderr, "%s: failed to create test\n", argv0 );
 	exit( EXIT_FAILURE );
     }
-    iperf_defaults( test );
-    iperf_set_verbose( test, 1 );
+    iperf_test_defaults( test );
+  //  iperf_set_verbose( test, 1 );
 
     iperf_set_test_role( test, 'c' );
     iperf_set_test_server_hostname( test, host );
@@ -54,10 +54,10 @@ main( int argc, char** argv )
 	exit( EXIT_FAILURE );
     }
 
-    if (iperf_get_test_json_output_string(test)) {
-	fprintf(iperf_get_test_outfile(test), "%zd bytes of JSON emitted\n",
-		strlen(iperf_get_test_json_output_string(test)));
-    }
+    // if (iperf_get_test_json_output_string(test)) {
+	// fprintf(iperf_get_test_outfile(test), "%zd bytes of JSON emitted\n",
+	// 	strlen(iperf_get_test_json_output_string(test)));
+    // }
 
     iperf_free_test( test );
     exit( EXIT_SUCCESS );

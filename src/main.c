@@ -50,19 +50,20 @@
 #include "units.h"
 
 
-static int run(struct iperf_test *test);
+static int run(struct iperf_master_test *master_test);
 
 
 /**************************************************************************/
 int
 main(int argc, char **argv)
 {
-    struct iperf_test *test;
+    struct iperf_master_test *master_test;
 
+ 
     // XXX: Setting the process affinity requires root on most systems.
     //      Is this a feature we really need?
 #ifdef TEST_PROC_AFFINITY
-    /* didn't seem to work.... */
+    /* didnt seem to work.... */
     /*
      * increasing the priority of the process to minimise packet generation
      * delay
@@ -74,7 +75,7 @@ main(int argc, char **argv)
         fprintf(stderr, "setting priority to valid level\n");
         rc = setpriority(PRIO_PROCESS, 0, 0);
     }
-
+    
     /* setting the affinity of the process  */
     cpu_set_t cpu_set;
     int affinity = -1;
@@ -93,22 +94,25 @@ main(int argc, char **argv)
         err("couldn't change CPU affinity");
 #endif
 
-    test = iperf_new_test();
-    if (!test)
-        iperf_errexit(NULL, "create new test error - %s", iperf_strerror(i_errno));
-    iperf_defaults(test);	/* sets defaults */
+    master_test = iperf_new_master_test();
 
-    if (iperf_parse_arguments(test, argc, argv) < 0) {
-        iperf_err(test, "parameter error - %s", iperf_strerror(i_errno));
+    if (!master_test)
+        iperf_errexit(NULL, "create new test error - %s", iperf_strerror(i_errno));
+     iperf_master_defaults(master_test);	/* sets defaults */
+
+
+    if (iperf_parse_arguments(master_test, argc, argv) < 0) {
+   
+        iperf_err_master(master_test, "parameter error - %s", iperf_strerror(i_errno));
         fprintf(stderr, "\n");
         usage_long(stdout);
         exit(1);
     }
 
-    if (run(test) < 0)
-        iperf_errexit(test, "error - %s", iperf_strerror(i_errno));
+    if (run(master_test) < 0)
+        iperf_errexit(master_test, "error - %s", iperf_strerror(i_errno));
 
-    iperf_free_test(test);
+    iperf_free_master_test(master_test);
 
     return 0;
 }
@@ -124,48 +128,49 @@ sigend_handler(int sig)
 
 /**************************************************************************/
 static int
-run(struct iperf_test *test)
+run(struct iperf_master_test *master_test)
 {
     /* Termination signals. */
     iperf_catch_sigend(sigend_handler);
     if (setjmp(sigend_jmp_buf))
-	iperf_got_sigend(test);
+	iperf_master_got_sigend(master_test);
 
     /* Ignore SIGPIPE to simplify error handling */
     signal(SIGPIPE, SIG_IGN);
 
-    switch (test->role) {
+
+    switch (master_test->role) {
         case 's':
-	    if (test->daemon) {
+	    if (master_test->daemon) {
 		int rc;
 		rc = daemon(0, 0);
 		if (rc < 0) {
 		    i_errno = IEDAEMON;
-		    iperf_errexit(test, "error - %s", iperf_strerror(i_errno));
+		    iperf_errexit(master_test, "error - %s", iperf_strerror(i_errno));
 		}
 	    }
-	    if (iperf_create_pidfile(test) < 0) {
+	    if (iperf_create_pidfile(master_test) < 0) {
 		i_errno = IEPIDFILE;
-		iperf_errexit(test, "error - %s", iperf_strerror(i_errno));
+		iperf_errexit(master_test, "error - %s", iperf_strerror(i_errno));
 	    }
             for (;;) {
 		int rc;
-		rc = iperf_run_server(test);
-                test->server_last_run_rc =rc;
+		rc = iperf_run_server(master_test);
+                master_test->server_last_run_rc =rc;
 		if (rc < 0) {
-		    iperf_err(test, "error - %s", iperf_strerror(i_errno));
-                    if (test->json_output) {
-                        if (iperf_json_finish(test) < 0)
+		    iperf_err_master(master_test, "error - %s", iperf_strerror(i_errno));
+                    if (master_test->json_output) {
+                        if (iperf_json_finish(master_test) < 0)
                             return -1;
                     }
-                    iflush(test);
+                    iflush(master_test);
 
 		    if (rc < -1) {
-		        iperf_errexit(test, "exiting");
+		        iperf_errexit(master_test, "exiting");
 		    }
                 }
-                iperf_reset_test(test);
-                if (iperf_get_test_one_off(test) && rc != 2) {
+                iperf_reset_master_test(master_test);
+                if (iperf_get_test_one_off(master_test) && rc != 2) {
 		    /* Authentication failure doesn't count for 1-off test */
 		    if (rc < 0 && i_errno == IEAUTHTEST) {
 			continue;
@@ -173,19 +178,7 @@ run(struct iperf_test *test)
 		    break;
 		}
             }
-	    iperf_delete_pidfile(test);
-            break;
-	case 'c':
-	    if (iperf_create_pidfile(test) < 0) {
-		i_errno = IEPIDFILE;
-		iperf_errexit(test, "error - %s", iperf_strerror(i_errno));
-	    }
-	    if (iperf_run_client(test) < 0)
-		iperf_errexit(test, "error - %s", iperf_strerror(i_errno));
-	    iperf_delete_pidfile(test);
-            break;
-        default:
-            usage();
+	    iperf_delete_pidfile(master_test);
             break;
     }
 

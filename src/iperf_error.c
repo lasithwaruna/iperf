@@ -60,6 +60,44 @@ iperf_err(struct iperf_test *test, const char *format, ...)
     if (test != NULL && test->json_output && test->json_top != NULL)
 	cJSON_AddStringToObject(test->json_top, "error", str);
     else
+	if (test && test->mster_test->outfile && test->mster_test->outfile != stdout) {
+	    if (ct) {
+		fprintf(test->mster_test->outfile, "%s", ct);
+	    }
+	    fprintf(test->mster_test->outfile, "iperf3: %s\n", str);
+	}
+	else {
+	    if (ct) {
+		fprintf(stderr, "%s", ct);
+	    }
+	    fprintf(stderr, "iperf3: %s\n", str);
+	}
+    va_end(argp);
+}
+
+/* Do a printf to stderr. */
+void
+iperf_err_master(struct iperf_master_test *test, const char *format, ...)
+{
+    va_list argp;
+    char str[1000];
+    time_t now;
+    struct tm *ltm = NULL;
+    char *ct = NULL;
+
+    /* Timestamp if requested */
+    if (test != NULL && test->timestamps) {
+	time(&now);
+	ltm = localtime(&now);
+	strftime(iperf_timestrerr, sizeof(iperf_timestrerr), test->timestamp_format, ltm);
+	ct = iperf_timestrerr;
+    }
+
+    va_start(argp, format);
+    vsnprintf(str, sizeof(str), format, argp);
+    if (test != NULL && test->json_output && test->json_top != NULL)
+	cJSON_AddStringToObject(test->json_top, "error", str);
+    else
 	if (test && test->outfile && test->outfile != stdout) {
 	    if (ct) {
 		fprintf(test->outfile, "%s", ct);
@@ -77,7 +115,7 @@ iperf_err(struct iperf_test *test, const char *format, ...)
 
 /* Do a printf to stderr or log file as appropriate, then exit. */
 void
-iperf_errexit(struct iperf_test *test, const char *format, ...)
+iperf_errexit(struct iperf_master_test *master_test, const char *format, ...)
 {
     va_list argp;
     char str[1000];
@@ -86,7 +124,7 @@ iperf_errexit(struct iperf_test *test, const char *format, ...)
     char *ct = NULL;
 
     /* Timestamp if requested */
-    if (test != NULL && test->timestamps) {
+    if (master_test != NULL && master_test->timestamps) {
 	time(&now);
 	ltm = localtime(&now);
 	strftime(iperf_timestrerr, sizeof(iperf_timestrerr), "%c ", ltm);
@@ -95,15 +133,15 @@ iperf_errexit(struct iperf_test *test, const char *format, ...)
 
     va_start(argp, format);
     vsnprintf(str, sizeof(str), format, argp);
-    if (test != NULL && test->json_output && test->json_top != NULL) {
-	cJSON_AddStringToObject(test->json_top, "error", str);
-	iperf_json_finish(test);
+    if (master_test != NULL && master_test->json_output && master_test->json_top != NULL) {
+	cJSON_AddStringToObject(master_test->json_top, "error", str);
+	iperf_json_finish(master_test);
     } else
-	if (test && test->outfile && test->outfile != stdout) {
+	if (master_test && master_test->outfile && master_test->outfile != stdout) {
 	    if (ct) {
-		fprintf(test->outfile, "%s", ct);
+		fprintf(master_test->outfile, "%s", ct);
 	    }
-	    fprintf(test->outfile, "iperf3: %s\n", str);
+	    fprintf(master_test->outfile, "iperf3: %s\n", str);
 	}
 	else {
 	    if (ct) {
@@ -112,8 +150,8 @@ iperf_errexit(struct iperf_test *test, const char *format, ...)
 	    fprintf(stderr, "iperf3: %s\n", str);
 	}
     va_end(argp);
-    if (test)
-        iperf_delete_pidfile(test);
+    if (master_test)
+        iperf_delete_pidfile(master_test);
     exit(1);
 }
 
@@ -400,7 +438,7 @@ iperf_strerror(int int_errno)
             perr = 1;
             break;
         case IESETCONGESTION:
-            snprintf(errstr, len, "unable to set TCP_CONGESTION: "
+            snprintf(errstr, len, "unable to set TCP_CONGESTION: " 
                                   "Supplied congestion control algorithm not supported on this host");
             break;
 	case IEPIDFILE:
@@ -436,17 +474,8 @@ iperf_strerror(int int_errno)
 	    snprintf(errstr, len, "skew threshold must be a positive number");
             break;
 	case IEIDLETIMEOUT:
-	    snprintf(errstr, len, "idle timeout parameter is not positive or larger than allowed limit");
+	    snprintf(errstr, len, "idle timeout parameter is not positive or larget then allowed limit");
             break;
-	case IEBINDDEV:
-	    snprintf(errstr, len, "Unable to bind-to-device (check perror, maybe permissions?)");
-            break;
-    case IEBINDDEVNOSUPPORT:
-	    snprintf(errstr, len, "`<ip>%%<dev>` is not supported as system does not support bind to device");
-            break;
-    case IEHOSTDEV:
-	    snprintf(errstr, len, "host device name (ip%%<dev>) is supported (and required) only for IPv6 link-local address");
-            break;        
 	case IENOMSG:
 	    snprintf(errstr, len, "idle timeout for receiving data");
             break;

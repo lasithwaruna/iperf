@@ -67,7 +67,7 @@
 #endif /* HAVE_TCP_CONGESTION */
 
 int
-iperf_server_listen(struct iperf_test *test)
+iperf_server_listen(struct iperf_master_test *test)
 {
     retry:
     if((test->listener = netannounce(test->settings->domain, Ptcp, test->bind_address, test->bind_dev, test->server_port)) < 0) {
@@ -85,14 +85,14 @@ iperf_server_listen(struct iperf_test *test)
 	    return -1;
 	}
     }
-
     if (!test->json_output) {
         if (test->server_last_run_rc != 2)
             test->server_test_number +=1;
         if (test->debug || test->server_last_run_rc != 2) {
-	    iperf_printf(test, "-----------------------------------------------------------\n");
-	    iperf_printf(test, "Server listening on %d (test #%d)\n", test->server_port, test->server_test_number);
-	    iperf_printf(test, "-----------------------------------------------------------\n");
+  
+	    iperf_printf_master(test, "-----------------------------------------------------------\n");
+	    iperf_printf_master(test, "Server listening on %d (test #%d)\n", test->server_port, test->server_test_number);
+	    iperf_printf_master(test, "-----------------------------------------------------------\n");
 	    if (test->forceflush)
 	        iflush(test);
         }
@@ -107,59 +107,99 @@ iperf_server_listen(struct iperf_test *test)
 }
 
 int
-iperf_accept(struct iperf_test *test)
+iperf_accept(struct iperf_master_test *master_test)
 {
+
     int s;
+    int isNewTest = 1;
     signed char rbuf = ACCESS_DENIED;
     socklen_t len;
     struct sockaddr_storage addr;
 
     len = sizeof(addr);
-    if ((s = accept(test->listener, (struct sockaddr *) &addr, &len)) < 0) {
+    if ((s = accept(master_test->listener, (struct sockaddr *) &addr, &len)) < 0) {
         i_errno = IEACCEPT;
         return -1;
     }
 
-    if (test->ctrl_sck == -1) {
+    master_test->current_sck = s;
+   
+    // set TCP_NODELAY for lower latency on control messages
+    int flag = 1;
+    if (setsockopt(master_test->current_sck, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(int))) {
+        i_errno = IESETNODELAY;
+        return -1;
+    }
+
+    if (Nread(master_test->current_sck, master_test->current_cookie, COOKIE_SIZE, Ptcp) < 0) {
+        i_errno = IERECVCOOKIE;
+        return -1;
+    }
+
+    int i = 0;
+    for (; i <= master_test->max_fd ; i++){
+         if(i == s) continue;
+
+        if ( master_test->test_map[i] && strcmp(master_test->current_cookie, master_test->test_map[i]->cookie) == 0) {
+ 
+            isNewTest = 0; 
+            break;
+        }
+    }
+      
+    int testCount = 10;
+    if (isNewTest) {
+
+        master_test->test_map[s] = iperf_new_test(); 
+        master_test->test_map[s]->mster_test = master_test;
+        iperf_test_defaults(master_test->test_map[s]);	/* sets defaults */
+        iperf_init_test_with_args(master_test,master_test->test_map[s]);
+
+
         /* Server free, accept new client */
-        test->ctrl_sck = s;
-        // set TCP_NODELAY for lower latency on control messages
-        int flag = 1;
-        if (setsockopt(test->ctrl_sck, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(int))) {
-            i_errno = IESETNODELAY;
+        strcpy(master_test->test_map[s]->cookie, master_test->current_cookie);
+         master_test->test_map[s]->ctrl_sck = master_test->current_sck;
+         master_test->currunt_conn_type = CONN_CTRL;
+     
+        FD_SET(master_test->test_map[s]->ctrl_sck, &master_test->read_set);
+    
+        if (master_test->test_map[s]->ctrl_sck > master_test->max_fd) master_test->max_fd = master_test->test_map[s]->ctrl_sck ;
+
+        if (iperf_set_send_state(master_test->test_map[s], PARAM_EXCHANGE) != 0){
+            return -1;
+        }
+  
+        if (iperf_exchange_parameters(master_test->test_map[s]) < 0){
             return -1;
         }
 
-        if (Nread(test->ctrl_sck, test->cookie, COOKIE_SIZE, Ptcp) < 0) {
-            i_errno = IERECVCOOKIE;
-            return -1;
-        }
-	FD_SET(test->ctrl_sck, &test->read_set);
-	if (test->ctrl_sck > test->max_fd) test->max_fd = test->ctrl_sck;
+        if (master_test->server_affinity != -1) 
+            if (iperf_setaffinity(master_test, master_test->server_affinity) != 0){
+                return -1;
+            }
+            if (master_test->test_map[s]->on_connect)
+                master_test->test_map[s]->on_connect(master_test->test_map[s]);
 
-	if (iperf_set_send_state(test, PARAM_EXCHANGE) != 0)
-            return -1;
-        if (iperf_exchange_parameters(test) < 0)
-            return -1;
-	if (test->server_affinity != -1)
-	    if (iperf_setaffinity(test, test->server_affinity) != 0)
-		return -1;
-        if (test->on_connect)
-            test->on_connect(test);
+    }else if (testCount < 20){
+         //   master_test->skt_to_test[s]=master_test->skt_to_test[i];
+            master_test->test_map[s] = master_test->test_map[i] ;
+            master_test->currunt_conn_type = CONN_STREAM;
+
     } else {
 	/*
-	 * Don't try to read from the socket.  It could block an ongoing test.
+	 * Don't try to read from the socket.  It could block an ongoing test. 
 	 * Just send ACCESS_DENIED.
          * Also, if sending failed, don't return an error, as the request is not related
          * to the ongoing test, and returning an error will terminate the test.
 	 */
         if (Nwrite(s, (char*) &rbuf, sizeof(rbuf), Ptcp) < 0) {
-            if (test->debug)
+            if (master_test->debug)
                 printf("failed to send ACCESS_DENIED to an unsolicited connection request during active test\n");
         } else {
-            if (test->debug)
+            if (master_test->debug)
                 printf("successfully sent ACCESS_DENIED to an unsolicited connection request during active test\n");
         }
+        master_test->currunt_conn_type = CONN_UNKNOWN;
         close(s);
     }
 
@@ -195,15 +235,17 @@ iperf_handle_message_server(struct iperf_test *test)
             cpu_util(test->cpu_util);
             test->stats_callback(test);
             SLIST_FOREACH(sp, &test->streams, streams) {
-                FD_CLR(sp->socket, &test->read_set);
-                FD_CLR(sp->socket, &test->write_set);
+                FD_CLR(sp->socket, &test->mster_test->read_set);
+                FD_CLR(sp->socket, &test->mster_test->write_set);
                 close(sp->socket);
             }
             test->reporter_callback(test);
+
 	    if (iperf_set_send_state(test, EXCHANGE_RESULTS) != 0)
                 return -1;
             if (iperf_exchange_results(test) < 0)
                 return -1;
+        
 	    if (iperf_set_send_state(test, DISPLAY_RESULTS) != 0)
                 return -1;
             if (test->on_test_finish)
@@ -219,14 +261,15 @@ iperf_handle_message_server(struct iperf_test *test)
 	    signed char oldstate = test->state;
 	    cpu_util(test->cpu_util);
 	    test->state = DISPLAY_RESULTS;
+
 	    test->reporter_callback(test);
 	    test->state = oldstate;
 
             // XXX: Remove this line below!
 	    iperf_err(test, "the client has terminated");
             SLIST_FOREACH(sp, &test->streams, streams) {
-                FD_CLR(sp->socket, &test->read_set);
-                FD_CLR(sp->socket, &test->write_set);
+                FD_CLR(sp->socket, &test->mster_test->read_set);
+                FD_CLR(sp->socket, &test->mster_test->write_set);
                 close(sp->socket);
             }
             test->state = IPERF_DONE;
@@ -277,8 +320,10 @@ server_reporter_timer_proc(TimerClientData client_data, struct iperf_time *nowP)
 
     if (test->done)
         return;
-    if (test->reporter_callback)
-	test->reporter_callback(test);
+ 
+    if (test->reporter_callback){
+	    test->reporter_callback(test);
+    }
 }
 
 static int
@@ -325,13 +370,13 @@ create_server_timers(struct iperf_test * test)
 
 static void
 server_omit_timer_proc(TimerClientData client_data, struct iperf_time *nowP)
-{
+{   
     struct iperf_test *test = client_data.p;
 
     test->omit_timer = NULL;
     test->omitting = 0;
     iperf_reset_stats(test);
-    if (test->verbose && !test->json_output && test->reporter_interval == 0)
+    if (test->mster_test->verbose && !test->json_output && test->reporter_interval == 0)
 	iperf_printf(test, "%s", report_omit_done);
 
     /* Reset the timers. */
@@ -345,7 +390,7 @@ static int
 create_server_omit_timer(struct iperf_test * test)
 {
     struct iperf_time now;
-    TimerClientData cd;
+    TimerClientData cd; 
 
     if (test->omit == 0) {
 	test->omit_timer = NULL;
@@ -353,11 +398,11 @@ create_server_omit_timer(struct iperf_test * test)
     } else {
 	if (iperf_time_now(&now) < 0) {
 	    i_errno = IEINITTEST;
-	    return -1;
+	    return -1; 
 	}
 	test->omitting = 1;
 	cd.p = test;
-	test->omit_timer = tmr_create(&now, server_omit_timer_proc, cd, test->omit * SEC_TO_US, 0);
+	test->omit_timer = tmr_create(&now, server_omit_timer_proc, cd, test->omit * SEC_TO_US, 0); 
 	if (test->omit_timer == NULL) {
 	    i_errno = IEINITTEST;
 	    return -1;
@@ -368,20 +413,79 @@ create_server_omit_timer(struct iperf_test * test)
 }
 
 static void
-cleanup_server(struct iperf_test *test)
+cleanup_test(struct iperf_test *test)
 {
+
     struct iperf_stream *sp;
 
     /* Close open streams */
     SLIST_FOREACH(sp, &test->streams, streams) {
-	FD_CLR(sp->socket, &test->read_set);
-	FD_CLR(sp->socket, &test->write_set);
-	close(sp->socket);
+        FD_CLR(sp->socket, &test->mster_test->read_set);
+        FD_CLR(sp->socket, &test->mster_test->write_set);
+        close(sp->socket);
+        
     }
 
-    /* Close open test sockets */
+
+
+
+    printf("Cleanin the cookie of  %d,  \n",test->ctrl_sck); 
+    memset(test->cookie, 0, COOKIE_SIZE);
+
+        /* Close open test sockets */
     if (test->ctrl_sck) {
-	close(test->ctrl_sck);
+	    close(test->ctrl_sck);
+        test->ctrl_sck = -1;
+    }
+    // if (test->mster_test->listener) {
+	//     close(test->mster_test->listener);
+    // }
+    if (test->prot_listener > -1) {     // May remain open if create socket failed
+	    close(test->prot_listener);
+        test->prot_listener = -1;
+    }
+
+    /* Cancel any remaining timers. */
+    if (test->stats_timer != NULL) {
+        tmr_cancel(test->stats_timer);
+        test->stats_timer = NULL;
+    }
+    if (test->reporter_timer != NULL) {
+        tmr_cancel(test->reporter_timer);
+        test->reporter_timer = NULL;
+    }
+    if (test->omit_timer != NULL) {
+        tmr_cancel(test->omit_timer);
+        test->omit_timer = NULL;
+    }
+    if (test->congestion_used != NULL) {
+        free(test->congestion_used);
+    	test->congestion_used = NULL;
+    }
+    if (test->timer != NULL) {
+        tmr_cancel(test->timer);
+        test->timer = NULL;
+    }
+}
+
+static void
+cleanup_server(struct iperf_master_test *test)
+{
+    struct iperf_stream *sp;
+
+      printf("Clean up tests too \n");         
+
+
+    // /* Close open streams */
+    // SLIST_FOREACH(sp, &test->streams, streams) {
+	// FD_CLR(sp->socket, &test->mster_test->read_set);
+	// FD_CLR(sp->socket, &test->mster_test->write_set);
+	// close(sp->socket);
+    // }
+
+    /* Close open test sockets */
+    if (test->current_sck) {
+	close(test->current_sck);
     }
     if (test->listener) {
 	close(test->listener);
@@ -415,11 +519,11 @@ cleanup_server(struct iperf_test *test)
 
 
 int
-iperf_run_server(struct iperf_test *test)
+iperf_run_server(struct iperf_master_test *master_test)
 {
     int result, s;
-    int send_streams_accepted, rec_streams_accepted;
-    int streams_to_send = 0, streams_to_rec = 0;
+ //   int send_streams_accepted, rec_streams_accepted;
+//    int streams_to_send = 0, streams_to_rec = 0;
 #if defined(HAVE_TCP_CONGESTION)
     int saved_errno;
 #endif /* HAVE_TCP_CONGESTION */
@@ -435,63 +539,64 @@ iperf_run_server(struct iperf_test *test)
     int64_t timeout_us;
     int64_t rcv_timeout_us;
 
-    if (test->logfile)
-        if (iperf_open_logfile(test) < 0)
+    if (master_test->logfile)
+        if (iperf_open_logfile(master_test) < 0)
             return -1;
 
-    if (test->affinity != -1)
-	if (iperf_setaffinity(test, test->affinity) != 0)
+    if (master_test->affinity != -1) 
+	if (iperf_setaffinity(master_test, master_test->affinity) != 0)
 	    return -2;
 
-    if (test->json_output)
-	if (iperf_json_start(test) < 0)
+    if (master_test->json_output)
+	if (iperf_json_start(master_test) < 0)
 	    return -2;
 
-    if (test->json_output) {
-	cJSON_AddItemToObject(test->json_start, "version", cJSON_CreateString(version));
-	cJSON_AddItemToObject(test->json_start, "system_info", cJSON_CreateString(get_system_info()));
-    } else if (test->verbose) {
-	iperf_printf(test, "%s\n", version);
-	iperf_printf(test, "%s", "");
-	iperf_printf(test, "%s\n", get_system_info());
-	iflush(test);
+    if (master_test->json_output) {
+        cJSON_AddItemToObject(master_test->json_start, "version", cJSON_CreateString(version));
+        cJSON_AddItemToObject(master_test->json_start, "system_info", cJSON_CreateString(get_system_info()));
+    } else if (master_test->verbose) {
+        iperf_printf_master(master_test, "%s\n", version);
+        iperf_printf_master(master_test, "%s", "");
+        iperf_printf_master(master_test, "%s\n", get_system_info());
+	    iflush(master_test);
     }
 
     // Open socket and listen
-    if (iperf_server_listen(test) < 0) {
+    if (iperf_server_listen(master_test) < 0) {
         return -2;
     }
 
+
     iperf_time_now(&last_receive_time); // Initialize last time something was received
+    master_test->state = IPERF_START;
+    // send_streams_accepted = 0;
+    // rec_streams_accepted = 0;
+    rcv_timeout_us = (master_test->settings->rcv_timeout.secs * SEC_TO_US) + master_test->settings->rcv_timeout.usecs;
 
-    test->state = IPERF_START;
-    send_streams_accepted = 0;
-    rec_streams_accepted = 0;
-    rcv_timeout_us = (test->settings->rcv_timeout.secs * SEC_TO_US) + test->settings->rcv_timeout.usecs;
 
-    while (test->state != IPERF_DONE) {
+    while (1) {
 
         // Check if average transfer rate was exceeded (condition set in the callback routines)
-	if (test->bitrate_limit_exceeded) {
-	    cleanup_server(test);
-            i_errno = IETOTALRATE;
-            return -1;
-	}
+        if (master_test->bitrate_limit_exceeded) {
+            cleanup_server(master_test);
+                i_errno = IETOTALRATE;
+                return -1;	
+        }
 
-        memcpy(&read_set, &test->read_set, sizeof(fd_set));
-        memcpy(&write_set, &test->write_set, sizeof(fd_set));
+        memcpy(&read_set, &master_test->read_set, sizeof(fd_set));
+        memcpy(&write_set, &master_test->write_set, sizeof(fd_set));
 
-	iperf_time_now(&now);
-	timeout = tmr_timeout(&now);
+	    iperf_time_now(&now);
+	    timeout = tmr_timeout(&now);
 
         // Ensure select() will timeout to allow handling error cases that require server restart
-        if (test->state == IPERF_START) {       // In idle mode server may need to restart
-            if (timeout == NULL && test->settings->idle_timeout > 0) {
-                used_timeout.tv_sec = test->settings->idle_timeout;
+        if (master_test->state == IPERF_START) {       // In idle mode server may need to restart
+            if (timeout == NULL && master_test->settings->idle_timeout > 0) {
+                used_timeout.tv_sec = master_test->settings->idle_timeout;
                 used_timeout.tv_usec = 0;
                 timeout = &used_timeout;
             }
-        } else if (test->mode != SENDER) {     // In non-reverse active mode server ensures data is received
+        } else if (master_test->mode != SENDER) {     // In non-reverse active mode server ensures data is received
             timeout_us = -1;
             if (timeout != NULL) {
                 used_timeout.tv_sec = timeout->tv_sec;
@@ -499,15 +604,17 @@ iperf_run_server(struct iperf_test *test)
                 timeout_us = (timeout->tv_sec * SEC_TO_US) + timeout->tv_usec;
             }
             if (timeout_us < 0 || timeout_us > rcv_timeout_us) {
-                used_timeout.tv_sec = test->settings->rcv_timeout.secs;
-                used_timeout.tv_usec = test->settings->rcv_timeout.usecs;
+                used_timeout.tv_sec = master_test->settings->rcv_timeout.secs;
+                used_timeout.tv_usec = master_test->settings->rcv_timeout.usecs;
             }
             timeout = &used_timeout;
         }
 
-        result = select(test->max_fd + 1, &read_set, &write_set, NULL, timeout);
+        result = select(master_test->max_fd + 1, &read_set, &write_set, NULL, timeout);
+  
         if (result < 0 && errno != EINTR) {
-            cleanup_server(test);
+            printf( "  cleanup_server    result,errno), %d, %d   \n",result,errno);
+            cleanup_server(master_test);
             i_errno = IESELECT;
             return -1;
         } else if (result == 0) {
@@ -518,288 +625,317 @@ iperf_run_server(struct iperf_test *test)
             t_usecs = 0;
             if (iperf_time_diff(&now, &last_receive_time, &diff_time) == 0) {
                 t_usecs = iperf_time_in_usecs(&diff_time);
-                if (test->state == IPERF_START) {
-                    if (test->settings->idle_timeout > 0 && t_usecs >= test->settings->idle_timeout * SEC_TO_US) {
-                        test->server_forced_idle_restarts_count += 1;
-                        if (test->debug)
+                if (master_test->state == IPERF_START) {
+                    if (master_test->settings->idle_timeout > 0 && t_usecs >= master_test->settings->idle_timeout * SEC_TO_US) {
+                        master_test->server_forced_idle_restarts_count += 1;
+                        if (master_test->debug)
                             printf("Server restart (#%d) in idle state as no connection request was received for %d sec\n",
-                                test->server_forced_idle_restarts_count, test->settings->idle_timeout);
-                        cleanup_server(test);
-			if ( iperf_get_test_one_off(test) ) {
-			  if (test->debug)
+                                master_test->server_forced_idle_restarts_count, master_test->settings->idle_timeout);
+                                printf( "  cleanup_server    3  \n");
+                        cleanup_server(master_test);
+			if ( iperf_get_test_one_off(master_test) ) {
+			  if (master_test->debug)
                             printf("No connection request was received for %d sec in one-off mode; exiting.\n",
-				   test->settings->idle_timeout);
+				   master_test->settings->idle_timeout);
 			  exit(0);
 			}
 
                         return 2;
                     }
                 }
-                else if (test->mode != SENDER && t_usecs > rcv_timeout_us) {
-                    test->server_forced_no_msg_restarts_count += 1;
+                else if (master_test->mode != SENDER && t_usecs > rcv_timeout_us) {
+                    master_test->server_forced_no_msg_restarts_count += 1;
                     i_errno = IENOMSG;
-                    if (iperf_get_verbose(test))
-                        iperf_err(test, "Server restart (#%d) during active test due to idle data for receiving data",
-                                  test->server_forced_no_msg_restarts_count);
-                    cleanup_server(test);
+                    if (iperf_get_verbose(master_test))
+                        iperf_err_master(master_test, "Server restart (#%d) during active test due to idle data for receiving data",
+                                  master_test->server_forced_no_msg_restarts_count);
+                    
+
+                    cleanup_server(master_test);
                     return -1;
                 }
 
             }
         }
 
-	if (result > 0) {
+	    if (result > 0) {
             iperf_time_now(&last_receive_time);
-            if (FD_ISSET(test->listener, &read_set)) {
-                if (test->state != CREATE_STREAMS) {
-                    if (iperf_accept(test) < 0) {
-			cleanup_server(test);
+            if (FD_ISSET(master_test->listener, &read_set)) {
+     
+                    if (iperf_accept(master_test) < 0) {
+			            cleanup_server(master_test);
                         return -1;
                     }
-                    FD_CLR(test->listener, &read_set);
 
-                    // Set streams number
-                    if (test->mode == BIDIRECTIONAL) {
-                        streams_to_send = test->num_streams;
-                        streams_to_rec = test->num_streams;
-                    } else if (test->mode == RECEIVER) {
-                        streams_to_rec = test->num_streams;
-                        streams_to_send = 0;
-                    } else {
-                        streams_to_send = test->num_streams;
-                        streams_to_rec = 0;
-                    }
-                }
-            }
-            if (FD_ISSET(test->ctrl_sck, &read_set)) {
-                if (iperf_handle_message_server(test) < 0) {
-		    cleanup_server(test);
-                    return -1;
-		}
-                FD_CLR(test->ctrl_sck, &read_set);
-            }
+                    int current_sck = master_test->current_sck;
 
-            if (test->state == CREATE_STREAMS) {
-                if (FD_ISSET(test->prot_listener, &read_set)) {
-
-                    if ((s = test->protocol->accept(test)) < 0) {
-			cleanup_server(test);
-                        return -1;
-		    }
-
-                    if (!is_closed(s)) {
-
-#if defined(HAVE_TCP_CONGESTION)
-		    if (test->protocol->id == Ptcp) {
-			if (test->congestion) {
-			    if (setsockopt(s, IPPROTO_TCP, TCP_CONGESTION, test->congestion, strlen(test->congestion)) < 0) {
-				/*
-				 * ENOENT means we tried to set the
-				 * congestion algorithm but the algorithm
-				 * specified doesn't exist.  This can happen
-				 * if the client and server have different
-				 * congestion algorithms available.  In this
-				 * case, print a warning, but otherwise
-				 * continue.
-				 */
-				if (errno == ENOENT) {
-				    warning("TCP congestion control algorithm not supported");
-				}
-				else {
-				    saved_errno = errno;
-				    close(s);
-				    cleanup_server(test);
-				    errno = saved_errno;
-				    i_errno = IESETCONGESTION;
-				    return -1;
-				}
-			    }
-			}
-			{
-			    socklen_t len = TCP_CA_NAME_MAX;
-			    char ca[TCP_CA_NAME_MAX + 1];
-                            int rc;
-			    rc = getsockopt(s, IPPROTO_TCP, TCP_CONGESTION, ca, &len);
-                            if (rc < 0 && test->congestion) {
-				saved_errno = errno;
-				close(s);
-				cleanup_server(test);
-				errno = saved_errno;
-				i_errno = IESETCONGESTION;
-				return -1;
-			    }
-                            /*
-                             * If not the first connection, discard prior
-                             * congestion algorithm name so we don't leak
-                             * duplicated strings.  We probably don't need
-                             * the old string anyway.
-                             */
-                            if (test->congestion_used != NULL) {
-                                free(test->congestion_used);
-                            }
-                            // Set actual used congestion alg, or set to unknown if could not get it
-                            if (rc < 0)
-                                test->congestion_used = strdup("unknown");
-                            else
-                                test->congestion_used = strdup(ca);
-			    if (test->debug) {
-				printf("Congestion algorithm is %s\n", test->congestion_used);
-			    }
-			}
-		    }
-#endif /* HAVE_TCP_CONGESTION */
-
-                        if (rec_streams_accepted != streams_to_rec) {
-                            flag = 0;
-                            ++rec_streams_accepted;
-                        } else if (send_streams_accepted != streams_to_send) {
-                            flag = 1;
-                            ++send_streams_accepted;
+                    if(master_test->currunt_conn_type ==CONN_CTRL){
+                        // Set streams number
+                        if (master_test->test_map[current_sck]->mode == BIDIRECTIONAL) {
+                            master_test->test_map[current_sck]->streams_to_send = master_test->test_map[current_sck]->num_streams;
+                            master_test->test_map[current_sck]->streams_to_rec = master_test->test_map[current_sck]->num_streams;
+                        } else if (master_test->test_map[master_test->current_sck]->mode == RECEIVER) {
+                            master_test->test_map[current_sck]->streams_to_rec = master_test->test_map[current_sck]->num_streams;
+                            master_test->test_map[current_sck]->streams_to_send = 0;
+                        } else {
+                            master_test->test_map[current_sck]->streams_to_send = master_test->test_map[current_sck]->num_streams;
+                            master_test->test_map[current_sck]->streams_to_rec = 0;
                         }
+                    }else if(master_test->currunt_conn_type ==CONN_STREAM){
+            
 
-                        if (flag != -1) {
-                            sp = iperf_new_stream(test, s, flag);
-                            if (!sp) {
-                                cleanup_server(test);
+                            if (!is_closed(current_sck)) {
+                             
+                                #if defined(HAVE_TCP_CONGESTION)
+                                        if (master_test->test_map[current_sck]->protocol->id == Ptcp) {
+                                        if (master_test->test_map[current_sck]->congestion) {
+                                            if (setsockopt(s, IPPROTO_TCP, TCP_CONGESTION, master_test->test_map[current_sck]->congestion, strlen(master_test->test_map[current_sck]->congestion)) < 0) {
+                                            /*
+                                            * ENOENT means we tried to set the
+                                            * congestion algorithm but the algorithm
+                                            * specified doesn't exist.  This can happen
+                                            * if the client and server have different
+                                            * congestion algorithms available.  In this
+                                            * case, print a warning, but otherwise
+                                            * continue.
+                                            */
+                                            if (errno == ENOENT) {
+                                                warning("TCP congestion control algorithm not supported");
+                                            }
+                                            else {
+                                                saved_errno = errno;
+                                                close(s);
+                                                cleanup_server(master_test);
+                                                errno = saved_errno;
+                                                i_errno = IESETCONGESTION;
+                                                return -1;
+                                            }
+                                            } 
+                                        }
+                                        {
+                                            socklen_t len = TCP_CA_NAME_MAX;
+                                            char ca[TCP_CA_NAME_MAX + 1];
+                                                        int rc;
+                                            rc = getsockopt(s, IPPROTO_TCP, TCP_CONGESTION, ca, &len);
+                                                        if (rc < 0 && master_test->test_map[current_sck]->congestion) {
+                                            saved_errno = errno;
+                                            close(s);
+                                            cleanup_server(master_test);
+                                            errno = saved_errno;
+                                            i_errno = IESETCONGESTION;
+                                            return -1;
+                                            }
+                                                        /* 
+                                                        * If not the first connection, discard prior
+                                                        * congestion algorithm name so we don't leak
+                                                        * duplicated strings.  We probably don't need
+                                                        * the old string anyway.
+                                                        */
+                                                        if (master_test->test_map[current_sck]->congestion_used != NULL) {
+                                                            free(master_test->test_map[current_sck]->congestion_used);
+                                                        }
+                                                        // Set actual used congestion alg, or set to unknown if could not get it
+                                                        if (rc < 0)
+                                                            master_test->test_map[current_sck]->congestion_used = strdup("unknown");
+                                                        else
+                                                            master_test->test_map[current_sck]->congestion_used = strdup(ca);
+                                            if (master_test->test_map[current_sck]->debug) {
+                                            printf("Congestion algorithm is %s\n", master_test->test_map[current_sck]->congestion_used);
+                                            }
+                                        }
+                                        }
+                                #endif /* HAVE_TCP_CONGESTION */
+
+
+
+                    
+
+
+                                if (master_test->test_map[current_sck]->rec_streams_accepted != master_test->test_map[current_sck]->streams_to_rec) {
+                                    flag = 0;
+                                    ++(master_test->test_map[current_sck]->rec_streams_accepted);
+                                } else if (master_test->test_map[current_sck]->send_streams_accepted != master_test->test_map[current_sck]->streams_to_send) {
+                                    flag = 1;
+                                    ++(master_test->test_map[current_sck]->send_streams_accepted);
+                                }
+
+
+                                if (flag != -1) {
+
+                                 
+                                    sp = iperf_new_stream(master_test->test_map[current_sck], master_test->current_sck , flag);
+                                    if (!sp) {
+                                        cleanup_server(master_test);
+                                        return -1;
+                                    }
+
+                                    if (sp->sender)
+                                        FD_SET(current_sck, &master_test->write_set);
+                                    else
+                                        FD_SET(current_sck, &master_test->read_set);
+
+                                    if (current_sck > master_test->max_fd) master_test->max_fd = current_sck;
+
+                                    /*
+                                    * If the protocol isn't UDP, or even if it is but
+                                    * we're the receiver, set nonblocking sockets.
+                                    * We need this to allow a server receiver to
+                                    * maintain interactivity with the control channel.
+                                    */
+                                    if (master_test->test_map[current_sck]->protocol->id != Pudp ||
+                                        !sp->sender) {
+                                        setnonblocking(s, 1);
+                                    }
+
+                                    if (master_test->test_map[current_sck]->on_new_stream)
+                                        master_test->test_map[current_sck]->on_new_stream(sp);
+
+                                    flag = -1;
+                                }
+                            }
+         
+                        if (master_test->test_map[current_sck]->rec_streams_accepted == master_test->test_map[current_sck]->streams_to_rec && master_test->test_map[current_sck]->send_streams_accepted == master_test->test_map[current_sck]->streams_to_send) {
+
+                            if (master_test->test_map[current_sck]->protocol->id != Ptcp) {
+                                FD_CLR(master_test->test_map[current_sck]->prot_listener, &master_test->read_set);
+                                close(master_test->test_map[current_sck]->prot_listener);
+                            } else { 
+                                if (master_test->test_map[current_sck]->no_delay || master_test->test_map[current_sck]->settings->mss || master_test->test_map[current_sck]->settings->socket_bufsize) {
+                                    FD_CLR(master_test->listener, &master_test->read_set);
+                                    close(master_test->listener);
+                                    master_test->listener = 0;
+                                            if ((s = netannounce(master_test->settings->domain, Ptcp, master_test->bind_address, master_test->bind_dev, master_test->server_port)) < 0) {
+                                                
+                                          
+                                                cleanup_server(master_test);
+                                                i_errno = IELISTEN;
+                                                return -1;
+                                            }
+                                            master_test->listener = s;
+                                            FD_SET(master_test->listener, &master_test->read_set);
+                                    if (master_test->listener > master_test->max_fd) master_test->max_fd = master_test->listener;
+                                }
+                            }
+                            master_test->test_map[current_sck]->prot_listener = -1;
+
+                            /* Ensure that total requested data rate is not above limit */
+                            iperf_size_t total_requested_rate = master_test->test_map[current_sck]->num_streams * master_test->test_map[current_sck]->settings->rate * (master_test->test_map[current_sck]->mode == BIDIRECTIONAL? 2 : 1);
+                            if (master_test->test_map[current_sck]->settings->bitrate_limit > 0 && total_requested_rate > master_test->test_map[current_sck]->settings->bitrate_limit) {
+                                        if (iperf_get_verbose(master_test))
+                                            iperf_err_master(master_test, "Client total requested throughput rate of %" PRIu64 " bps exceeded %" PRIu64 " bps limit",
+                                                    total_requested_rate, master_test->settings->bitrate_limit);
+
+
+                                cleanup_server(master_test);
+                                i_errno = IETOTALRATE;
                                 return -1;
                             }
 
-                            if (sp->sender)
-                                FD_SET(s, &test->write_set);
-                            else
-                                FD_SET(s, &test->read_set);
+                            // Begin calculating CPU utilization
+                            cpu_util(NULL);
 
-                            if (s > test->max_fd) test->max_fd = s;
-
-                            /*
-                             * If the protocol isn't UDP, or even if it is but
-                             * we're the receiver, set nonblocking sockets.
-                             * We need this to allow a server receiver to
-                             * maintain interactivity with the control channel.
-                             */
-                            if (test->protocol->id != Pudp ||
-                                !sp->sender) {
-                                setnonblocking(s, 1);
-                            }
-
-                            if (test->on_new_stream)
-                                test->on_new_stream(sp);
-
-                            flag = -1;
-                        }
-                    }
-                    FD_CLR(test->prot_listener, &read_set);
-                }
-
-
-                if (rec_streams_accepted == streams_to_rec && send_streams_accepted == streams_to_send) {
-                    if (test->protocol->id != Ptcp) {
-                        FD_CLR(test->prot_listener, &test->read_set);
-                        close(test->prot_listener);
-                    } else {
-                        if (test->no_delay || test->settings->mss || test->settings->socket_bufsize) {
-                            FD_CLR(test->listener, &test->read_set);
-                            close(test->listener);
-			    test->listener = 0;
-                            if ((s = netannounce(test->settings->domain, Ptcp, test->bind_address, test->bind_dev, test->server_port)) < 0) {
-				cleanup_server(test);
-                                i_errno = IELISTEN;
+                            if (iperf_set_send_state(master_test->test_map[current_sck], TEST_START) != 0) {
+                                cleanup_test(master_test->test_map[current_sck]);
                                 return -1;
                             }
-                            test->listener = s;
-                            FD_SET(test->listener, &test->read_set);
-			    if (test->listener > test->max_fd) test->max_fd = test->listener;
+
+                            if (iperf_init_test(master_test->test_map[current_sck]) < 0) {
+                                cleanup_test(master_test->test_map[current_sck]);
+                                return -1;
+                            }
+                            if (create_server_timers(master_test->test_map[current_sck]) < 0) {
+                                cleanup_test(master_test->test_map[current_sck]);
+                                return -1;
+                            }
+                            if (create_server_omit_timer(master_test->test_map[current_sck]) < 0) {
+                                cleanup_test(master_test->test_map[current_sck]);
+                                return -1;
+                            }
+                            if (master_test->test_map[current_sck]->mode != RECEIVER)
+                            if (iperf_create_send_timers(master_test->test_map[current_sck]) < 0) {
+                                cleanup_test(master_test->test_map[current_sck]);
+                                return -1;
+                            }
+
+                            if (iperf_set_send_state(master_test->test_map[current_sck], TEST_RUNNING) != 0) {
+                                cleanup_test(master_test->test_map[current_sck]);
+                                return -1;
+                            }
+
+
                         }
+
                     }
-                    test->prot_listener = -1;
 
-		    /* Ensure that total requested data rate is not above limit */
-		    iperf_size_t total_requested_rate = test->num_streams * test->settings->rate * (test->mode == BIDIRECTIONAL? 2 : 1);
-		    if (test->settings->bitrate_limit > 0 && total_requested_rate > test->settings->bitrate_limit) {
-                        if (iperf_get_verbose(test))
-                            iperf_err(test, "Client total requested throughput rate of %" PRIu64 " bps exceeded %" PRIu64 " bps limit",
-                                      total_requested_rate, test->settings->bitrate_limit);
-			cleanup_server(test);
-			i_errno = IETOTALRATE;
-			return -1;
-		    }
+                    FD_CLR(master_test->listener, &read_set);
 
-		    // Begin calculating CPU utilization
-		    cpu_util(NULL);
-
-		    if (iperf_set_send_state(test, TEST_START) != 0) {
-			cleanup_server(test);
-                        return -1;
-		    }
-                    if (iperf_init_test(test) < 0) {
-			cleanup_server(test);
-                        return -1;
-		    }
-		    if (create_server_timers(test) < 0) {
-			cleanup_server(test);
-                        return -1;
-		    }
-		    if (create_server_omit_timer(test) < 0) {
-			cleanup_server(test);
-                        return -1;
-		    }
-		    if (test->mode != RECEIVER)
-			if (iperf_create_send_timers(test) < 0) {
-			    cleanup_server(test);
-			    return -1;
-			}
-		    if (iperf_set_send_state(test, TEST_RUNNING) != 0) {
-			cleanup_server(test);
-                        return -1;
-		    }
-                }
             }
 
-            if (test->state == TEST_RUNNING) {
-                if (test->mode == BIDIRECTIONAL) {
-                    if (iperf_recv(test, &read_set) < 0) {
-                        cleanup_server(test);
-                        return -1;
+            for(int i=0;i <= master_test->max_fd;i++){
+                
+                    if(master_test->test_map[i] && master_test->test_map[i]->ctrl_sck == i){
+                         if (FD_ISSET(i, &read_set)) {
+           
+                            if (iperf_handle_message_server(master_test->test_map[i]) < 0) {
+                                cleanup_test(master_test->test_map[i]);
+                                        return -1;
+                            }
+
+                            iperf_reset_single_test(master_test->test_map[i]);
+                            master_test->test_map[i] = NULL;
+                            close(i);
+                            FD_CLR(i, &master_test->read_set);  
+                         }
                     }
-                    if (iperf_send(test, &write_set) < 0) {
-                        cleanup_server(test);
-                        return -1;
+
+
+                    if (master_test->test_map[i] && master_test->test_map[i]->state == TEST_RUNNING) {
+                        if (master_test->test_map[i]->mode == BIDIRECTIONAL) {
+
+                            if (iperf_recv(master_test->test_map[i], &read_set) < 0) {
+                                cleanup_test(master_test->test_map[i]);
+                                return -1;
+                            }
+                            if (iperf_send(master_test->test_map[i], &write_set) < 0) {
+                                cleanup_test(master_test->test_map[i]);
+                                return -1;
+                            }
+                        } else if (master_test->test_map[i]->mode == SENDER) {
+                            // Reverse mode. Server sends.
+                            if (iperf_send(master_test->test_map[i], &write_set) < 0) {
+                                cleanup_test(master_test->test_map[i]);
+                                return -1;
+                            }
+                        } else {
+                            // Regular mode. Server receives.
+                            if (iperf_recv(master_test->test_map[i], &read_set) < 0) {
+                                cleanup_test(master_test->test_map[i]);
+                                return -1;
+                            }
+                        }
                     }
-                } else if (test->mode == SENDER) {
-                    // Reverse mode. Server sends.
-                    if (iperf_send(test, &write_set) < 0) {
-			cleanup_server(test);
-                        return -1;
-		    }
-                } else {
-                    // Regular mode. Server receives.
-                    if (iperf_recv(test, &read_set) < 0) {
-			cleanup_server(test);
-                        return -1;
-		    }
-                }
-	    }
+            }
         }
 
-	if (result == 0 ||
-	    (timeout != NULL && timeout->tv_sec == 0 && timeout->tv_usec == 0)) {
-	    /* Run the timers. */
-	    iperf_time_now(&now);
-	    tmr_run(&now);
-	}
+        if (result == 0 ||
+            (timeout != NULL && timeout->tv_sec == 0 && timeout->tv_usec == 0)) {
+            /* Run the timers. */
+            iperf_time_now(&now);
+            tmr_run(&now);
+        }
     }
 
-    cleanup_server(test);
+    cleanup_server(master_test);
 
-    if (test->json_output) {
-	if (iperf_json_finish(test) < 0)
+    if (master_test->json_output) {
+	if (iperf_json_finish(master_test) < 0)
 	    return -1;
-    }
+    } 
 
-    iflush(test);
+    iflush(master_test);
 
-    if (test->server_affinity != -1)
-	if (iperf_clearaffinity(test) != 0)
+    if (master_test->server_affinity != -1) 
+	if (iperf_clearaffinity(master_test) != 0)
 	    return -1;
 
     return 0;

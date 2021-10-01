@@ -235,13 +235,15 @@ netdial(int domain, int proto, const char *local, const char *bind_dev, int loca
 int
 netannounce(int domain, int proto, const char *local, const char *bind_dev, int port)
 {
+
     struct addrinfo hints, *res;
     char portstr[6];
     int s, opt, saved_errno;
 
     snprintf(portstr, 6, "%d", port);
     memset(&hints, 0, sizeof(hints));
-    /*
+
+    /* 
      * If binding to the wildcard address with no explicit address
      * family specified, then force us to get an AF_INET6 socket.  On
      * CentOS 6 and MacOS, getaddrinfo(3) with AF_UNSPEC in ai_family,
@@ -254,19 +256,20 @@ netannounce(int domain, int proto, const char *local, const char *bind_dev, int 
      * result structure is set to AF_INET6.
      */
     if (domain == AF_UNSPEC && !local) {
-	hints.ai_family = AF_INET6;
+	    hints.ai_family = AF_INET6;
     }
     else {
-	hints.ai_family = domain;
+	    hints.ai_family = domain;
     }
+
     hints.ai_socktype = proto;
     hints.ai_flags = AI_PASSIVE;
     if ((gerror = getaddrinfo(local, portstr, &hints, &res)) != 0)
-        return -1;
+        return -1; 
 
     s = socket(res->ai_family, proto, 0);
     if (s < 0) {
-	freeaddrinfo(res);
+	    freeaddrinfo(res);
         return -1;
     }
 
@@ -284,14 +287,16 @@ netannounce(int domain, int proto, const char *local, const char *bind_dev, int 
         }
     }
 
+
     opt = 1;
-    if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR,
+    if (setsockopt(s, SOL_SOCKET, SO_REUSEADDR, 
 		   (char *) &opt, sizeof(opt)) < 0) {
-	saved_errno = errno;
-	close(s);
-	freeaddrinfo(res);
-	errno = saved_errno;
-	return -1;
+        saved_errno = errno;
+        close(s);
+        freeaddrinfo(res);
+        errno = saved_errno;
+        return -1;
+
     }
     /*
      * If we got an IPv6 socket, figure out if it should accept IPv4
@@ -301,32 +306,33 @@ netannounce(int domain, int proto, const char *local, const char *bind_dev, int 
      * OpenBSD explicitly omits support for IPv4-mapped addresses,
      * even though it implements IPV6_V6ONLY.
      */
-#if defined(IPV6_V6ONLY) && !defined(__OpenBSD__)
+    #if defined(IPV6_V6ONLY) && !defined(__OpenBSD__)
     if (res->ai_family == AF_INET6 && (domain == AF_UNSPEC || domain == AF_INET6)) {
-	if (domain == AF_UNSPEC)
-	    opt = 0;
-	else
-	    opt = 1;
-	if (setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY,
-		       (char *) &opt, sizeof(opt)) < 0) {
-	    saved_errno = errno;
-	    close(s);
-	    freeaddrinfo(res);
-	    errno = saved_errno;
-	    return -1;
-	}
+        if (domain == AF_UNSPEC)
+            opt = 0;
+        else
+            opt = 1;
+        if (setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, 
+                (char *) &opt, sizeof(opt)) < 0) {
+            saved_errno = errno;
+            close(s);
+            freeaddrinfo(res);
+            errno = saved_errno;
+            return -1;
+        }
     }
 #endif /* IPV6_V6ONLY */
 
     if (bind(s, (struct sockaddr *) res->ai_addr, res->ai_addrlen) < 0) {
         saved_errno = errno;
         close(s);
-	freeaddrinfo(res);
+	    freeaddrinfo(res);
         errno = saved_errno;
         return -1;
     }
 
     freeaddrinfo(res);
+    
 
     if (proto == SOCK_STREAM) {
         if (listen(s, INT_MAX) < 0) {
@@ -336,6 +342,7 @@ netannounce(int domain, int proto, const char *local, const char *bind_dev, int 
             return -1;
         }
     }
+
 
     return s;
 }
@@ -375,6 +382,7 @@ Nread(int fd, char *buf, size_t count, int prot)
 int
 Nwrite(int fd, const char *buf, size_t count, int prot)
 {
+   
     register ssize_t r;
     register size_t nleft = count;
 

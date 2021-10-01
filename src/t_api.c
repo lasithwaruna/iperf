@@ -54,7 +54,7 @@ main(int argc, char **argv)
     test = iperf_new_test();
     assert(test != NULL);
 
-    iperf_defaults(test);
+    iperf_test_defaults(test);
 
     sint = 10;
     iperf_set_test_connect_timeout(test, sint);
